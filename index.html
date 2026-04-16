@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>宝宝营养看板</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config={theme:{extend:{colors:{
+  pk:{50:'#FFF5F6',100:'#FFE4E8',200:'#FFB5C2',400:'#E8899A'},
+  mt:{50:'#F0FAF5',100:'#E0F5EC',200:'#B5EAD7',400:'#7ECBAD'},
+  lv:{50:'#F5F0FA',100:'#EDE4F5',200:'#C3B1E1',400:'#9B85C4'},
+  pc:{50:'#FFF8F0',100:'#FFF0E0',200:'#FFDAB9',400:'#E8B88A'},
+  bl:{50:'#F0F6FA',100:'#E4F0F8',200:'#B5D5E8',400:'#82B5D0'},
+  cm:{50:'#FFFCF5',100:'#FFF5E0',200:'#FFE8B5'},
+}}}}
+</script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600&display=swap');
+*{box-sizing:border-box}
+body{font-family:'Noto Sans SC',system-ui,sans-serif;background:#FAFAF8}
+.bar-fill{transition:width .5s ease}
+.fade{animation:fadeIn .25s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.swap-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+</style>
+</head>
+<body class="pb-20">
+
+<header class="bg-white/90 backdrop-blur sticky top-0 z-50 border-b border-gray-100">
+  <div class="max-w-md mx-auto px-4 py-2.5 flex items-center justify-between">
+    <div>
+      <h1 class="text-base font-semibold text-gray-700">&#x1F33F; 宝宝营养看板</h1>
+      <p class="text-[10px] text-gray-400" id="hd-age">加载中...</p>
+    </div>
+    <div class="flex items-center gap-1.5">
+      <button onclick="go(-1)" class="w-7 h-7 rounded-full bg-pk-50 flex items-center justify-center text-pk-400 text-xs font-bold">&lt;</button>
+      <span id="hd-date" class="text-xs font-medium text-gray-600 min-w-[70px] text-center"></span>
+      <button onclick="go(1)" class="w-7 h-7 rounded-full bg-pk-50 flex items-center justify-center text-pk-400 text-xs font-bold">&gt;</button>
+    </div>
+  </div>
+  <div class="max-w-md mx-auto px-4 flex gap-6">
+    <button onclick="setView('day')" id="t-day" class="pb-1.5 text-xs border-b-2 border-pk-400 text-pk-400 font-semibold">日视图</button>
+    <button onclick="setView('week')" id="t-week" class="pb-1.5 text-xs border-b-2 border-transparent text-gray-400">周视图</button>
+    <button onclick="setView('growth')" id="t-growth" class="pb-1.5 text-xs border-b-2 border-transparent text-gray-400">成长</button>
+  </div>
+</header>
+
+<!-- Birthday modal -->
+<div id="bd-modal" class="fixed inset-0 z-[99] bg-black/30 flex items-center justify-center hidden">
+  <div class="bg-white rounded-2xl p-5 mx-4 w-full max-w-xs shadow-xl">
+    <p class="text-sm font-semibold text-gray-700 mb-1">设置宝宝生日</p>
+    <p class="text-[10px] text-gray-400 mb-3">系统会根据月龄自动调整营养目标和食谱建议</p>
+    <input type="date" id="bd-input" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 mb-3">
+    <div class="flex gap-2">
+      <button onclick="saveBirthday()" class="flex-1 bg-pk-400 text-white text-xs py-2 rounded-lg font-medium">确定</button>
+      <button onclick="closeBdModal()" class="flex-1 bg-gray-100 text-gray-500 text-xs py-2 rounded-lg">取消</button>
+    </div>
+  </div>
+</div>
+
+<main class="max-w-md mx-auto px-4 pt-3" id="app"></main>
+
+<script>
+// ═══════════ DATA ═══════════
+const F={
+  rice:{n:'软米饭',c:'staple',p:2.6,ca:10,fe:.3,zn:.5,va:0,dha:0},
+  sweet_potato:{n:'红薯',c:'staple',p:1.6,ca:23,fe:.5,zn:.2,va:709,dha:0},
+  purple_potato:{n:'紫薯',c:'staple',p:1.6,ca:18,fe:.8,zn:.3,va:100,dha:0},
+  oat:{n:'燕麦',c:'staple',p:13.5,ca:54,fe:4.7,zn:3.9,va:0,dha:0},
+  noodle:{n:'面条',c:'staple',p:4.5,ca:15,fe:1.5,zn:.5,va:0,dha:0},
+  potato:{n:'土豆',c:'staple',p:2,ca:8,fe:.8,zn:.4,va:5,dha:0},
+  yam:{n:'山药',c:'staple',p:1.9,ca:16,fe:.3,zn:.3,va:3,dha:0},
+  bread:{n:'面包',c:'staple',p:9,ca:52,fe:1.5,zn:.7,va:0,dha:0},
+  chicken:{n:'鸡胸肉',c:'protein',s:'poultry',p:23,ca:9,fe:1.1,zn:.8,va:20,dha:0},
+  chicken_leg:{n:'鸡腿肉',c:'protein',s:'poultry',p:20,ca:8,fe:.9,zn:1.8,va:18,dha:0},
+  chicken_liver:{n:'鸡肝',c:'protein',s:'poultry',p:17,ca:7,fe:12,zn:3.4,va:3700,dha:0},
+  duck:{n:'鸭肉',c:'protein',s:'poultry',p:16,ca:6,fe:2.2,zn:1.2,va:52,dha:0},
+  beef:{n:'牛肉',c:'protein',s:'livestock',p:20,ca:6,fe:2.8,zn:4.7,va:6,dha:0},
+  pork:{n:'猪瘦肉',c:'protein',s:'livestock',p:20,ca:6,fe:1.6,zn:2.4,va:6,dha:0},
+  pork_liver:{n:'猪肝',c:'protein',s:'livestock',p:19,ca:6,fe:22.6,zn:5.8,va:4972,dha:0},
+  pork_floss:{n:'肉松',c:'protein',s:'livestock',p:41,ca:14,fe:3.3,zn:4.5,va:0,dha:0},
+  lamb:{n:'羊肉',c:'protein',s:'livestock',p:19,ca:9,fe:2.3,zn:3.1,va:22,dha:0},
+  cod:{n:'鳕鱼',c:'protein',s:'fish',p:17,ca:12,fe:.5,zn:.4,va:12,dha:200},
+  salmon:{n:'三文鱼',c:'protein',s:'fish',p:20,ca:9,fe:.3,zn:.4,va:35,dha:180},
+  shrimp:{n:'虾仁',c:'protein',s:'fish',p:18,ca:62,fe:1.5,zn:1.4,va:15,dha:80},
+  seabass:{n:'鲈鱼',c:'protein',s:'fish',p:18,ca:14,fe:.4,zn:.5,va:10,dha:120},
+  dried_shrimp:{n:'虾皮',c:'protein',s:'fish',p:30,ca:991,fe:6.7,zn:1.9,va:7,dha:0},
+  tofu:{n:'嫩豆腐',c:'protein',s:'bean',p:8,ca:164,fe:1.9,zn:.7,va:0,dha:0},
+  edamame:{n:'毛豆',c:'protein',s:'bean',p:13,ca:58,fe:3.5,zn:1.7,va:22,dha:0},
+  egg_yolk:{n:'蛋黄',c:'protein',s:'egg',p:15.2,ca:112,fe:6.5,zn:3.7,va:438,dha:40},
+  egg:{n:'鸡蛋',c:'protein',s:'egg',p:13,ca:56,fe:2,zn:1.3,va:234,dha:20},
+  quail_egg:{n:'鹌鹑��',c:'protein',s:'egg',p:12.8,ca:60,fe:3.2,zn:1.6,va:281,dha:15},
+  broccoli:{n:'西兰花',c:'veg',p:4.1,ca:67,fe:1.1,zn:.8,va:200,dha:0},
+  carrot:{n:'胡萝卜',c:'veg',p:.8,ca:32,fe:.2,zn:.2,va:688,dha:0},
+  spinach:{n:'菠菜',c:'veg',p:2.6,ca:66,fe:2.7,zn:.5,va:487,dha:0},
+  pumpkin:{n:'��瓜',c:'veg',p:.7,ca:16,fe:.4,zn:.1,va:369,dha:0},
+  tomato:{n:'番茄',c:'veg',p:.9,ca:10,fe:.3,zn:.1,va:92,dha:0},
+  mushroom:{n:'香菇',c:'veg',p:2.2,ca:2,fe:.3,zn:.7,va:0,dha:0},
+  corn:{n:'甜玉米',c:'veg',p:3.3,ca:4,fe:.5,zn:.5,va:53,dha:0},
+  zucchini:{n:'西葫芦',c:'veg',p:.8,ca:14,fe:.4,zn:.2,va:25,dha:0},
+  bok_choy:{n:'小白菜',c:'veg',p:1.5,ca:90,fe:1.2,zn:.3,va:280,dha:0},
+  okra:{n:'秋葵',c:'veg',p:2,ca:81,fe:.4,zn:.6,va:88,dha:0},
+  pea:{n:'豌豆',c:'veg',p:7,ca:21,fe:1.5,zn:1,va:95,dha:0},
+  nori:{n:'海苔',c:'veg',p:26,ca:264,fe:33,zn:2.4,va:228,dha:0},
+  cucumber:{n:'黄瓜',c:'veg',p:.7,ca:16,fe:.3,zn:.2,va:15,dha:0},
+  lotus_root:{n:'莲藕',c:'veg',p:1.9,ca:39,fe:1.4,zn:.4,va:3,dha:0},
+  banana:{n:'香蕉',c:'fruit',p:1.1,ca:5,fe:.3,zn:.2,va:8,dha:0},
+  avocado:{n:'牛油果',c:'fruit',p:2,ca:12,fe:.6,zn:.6,va:7,dha:0},
+  blueberry:{n:'蓝莓',c:'fruit',p:.7,ca:6,fe:.3,zn:.2,va:3,dha:0},
+  apple:{n:'苹果',c:'fruit',p:.2,ca:4,fe:.1,zn:0,va:2,dha:0},
+  dragon_fruit:{n:'火龙果',c:'fruit',p:1.1,ca:9,fe:.5,zn:.2,va:0,dha:0},
+  mango:{n:'芒果',c:'fruit',p:.5,ca:10,fe:.2,zn:.1,va:180,dha:0},
+  strawberry:{n:'草莓',c:'fruit',p:.7,ca:16,fe:.4,zn:.1,va:5,dha:0},
+  kiwi:{n:'猕猴桃',c:'fruit',p:1,ca:27,fe:.3,zn:.1,va:7,dha:0},
+  pear:{n:'梨',c:'fruit',p:.4,ca:9,fe:.2,zn:.1,va:3,dha:0},
+  cherry:{n:'车厘子',c:'fruit',p:1,ca:13,fe:.4,zn:.1,va:38,dha:0},
+  milk:{n:'牛奶',c:'dairy',p:3.2,ca:104,fe:.1,zn:.4,va:31,dha:0},
+  yogurt:{n:'酸奶',c:'dairy',p:3.5,ca:120,fe:.1,zn:.5,va:26,dha:0},
+  cheese:{n:'奶酪',c:'dairy',p:25,ca:799,fe:.3,zn:3.2,va:297,dha:0},
+  sesame:{n:'芝麻酱',c:'dairy',p:19.2,ca:870,fe:58,zn:6.1,va:17,dha:0},
+  dha_oil:{n:'DHA藻油',c:'supplement',p:0,ca:0,fe:0,zn:0,va:0,dha:10000},
+};
+
+const DRI={
+  p:{n:'蛋白质',u:'g',t:25,color:'#E8899A'},
+  ca:{n:'钙',u:'mg',t:600,color:'#82B5D0'},
+  fe:{n:'铁',u:'mg',t:8,color:'#9B85C4'},
+  zn:{n:'锌',u:'mg',t:4,color:'#7ECBAD'},
+  va:{n:'维A',u:'μg',t:310,color:'#E8B88A'},
+  dha:{n:'DHA',u:'mg',t:100,color:'#82B5D0'},
+};
+
+const NK=['p','ca','fe','zn','va','dha'];
+
+// ═══════════ AGE STAGES ═══════════
+// 月龄区间 → DRI调整 + 份量系数 + 质地等级 + 新解锁食物
+const STAGES=[
+  { min:12, max:17, label:'12-17月龄',
+    phase:'泥糊→软颗粒',
+    dri:{p:25,ca:600,fe:8,zn:4,va:310,dha:100},
+    portion:1.0,
+    texLevel:1, // 1=蒸烂/切碎/泥状
+    texNote:'所有食材蒸至手指能轻松捏烂,肉类必须剁蓉;手指食物切5cm×小指粗;饭团乒乓球大小',
+    unlock:[],
+  },
+  { min:18, max:23, label:'18-23月龄',
+    phase:'软颗粒→小块',
+    dri:{p:25,ca:600,fe:8,zn:4,va:310,dha:100},
+    portion:1.15,
+    texLevel:2, // 2=软块/小丁
+    texNote:'肉类可切碎丁(不必泥状);蔬菜蒸至略有嚼劲;饭团可稍大;开始练习用勺',
+    unlock:['花生酱(稀释涂抹)','全蛋各种做法','酸奶可选有果粒款'],
+  },
+  { min:24, max:30, label:'24-30月龄',
+    phase:'小块→常规',
+    dri:{p:30,ca:600,fe:8,zn:4.5,va:360,dha:100},
+    portion:1.3,
+    texLevel:3, // 3=小块/条状,接近成人
+    texNote:'肉类可切小条;蔬菜不必蒸烂,保留适度口感;可吃简单炒菜(少油盐);练习用叉子',
+    unlock:['坚果碎(非整颗)','蜂蜜(少量)','意面/通心粉','菌菇可稍大块'],
+  },
+  { min:31, max:36, label:'31-36月龄',
+    phase:'接近家庭饮食',
+    dri:{p:30,ca:600,fe:8,zn:4.5,va:360,dha:100},
+    portion:1.45,
+    texLevel:4, // 4=基本与家庭同步
+    texNote:'可与家人同桌吃(单独少盐少油);肉切常规小块;水果不必蒸;学习自主用筷',
+    unlock:['整颗葡萄(纵向切四瓣)','虾可整只(去头壳)','饺子/包子'],
+  },
+];
+
+function getStage(months){
+  for(const s of STAGES) if(months>=s.min&&months<=s.max) return s;
+  if(months>36) return STAGES[STAGES.length-1];
+  return STAGES[0];
+}
+
+function calcMonths(birthday){
+  const bd=new Date(birthday), now=new Date();
+  return (now.getFullYear()-bd.getFullYear())*12+(now.getMonth()-bd.getMonth());
+}
+
+function getCurDRI(){
+  const s=curStage();
+  const d={};
+  for(const k of NK) d[k]={...DRI[k], t:s.dri[k]||DRI[k].t};
+  return d;
+}
+
+function curStage(){
+  const m=birthday?calcMonths(birthday):17;
+  return getStage(m);
+}
+
+function curPortion(){return curStage().portion}
+
+function ing(food,grams){return{food,grams}}
+
+const R={
+  // 饭团 15
+  rb_3fresh:{n:'三鲜饭团',t:'riceball',ps:'fish',
+    i:[ing('rice',60),ing('shrimp',20),ing('egg',15),ing('corn',10),ing('carrot',10)],
+    tip:'虾仁去虾线切碎+蛋碎+玉米碎,捏乒乓球大小',tex:'虾仁纵向切两半'},
+  rb_beef_mush:{n:'牛肉香菇饭团',t:'riceball',ps:'livestock',
+    i:[ing('rice',60),ing('beef',25),ing('mushroom',15),ing('broccoli',10)],
+    tip:'牛肉剁蓉蒸熟,香菇焯水切碎',tex:'牛肉必须剁成泥;表面沾肉松防滑'},
+  rb_egg_floss:{n:'蛋黄肉松饭团',t:'riceball',ps:'egg',
+    i:[ing('rice',60),ing('egg_yolk',15),ing('pork_floss',8),ing('zucchini',10)],
+    tip:'蛋黄压碎+肉松+饭拌匀,西葫芦擦丝焯水',tex:'外层滚肉松增加摩擦力'},
+  rb_cod_broc:{n:'鳕鱼西���花饭团',t:'riceball',ps:'fish',
+    i:[ing('rice',60),ing('cod',25),ing('broccoli',15),ing('carrot',10)],
+    tip:'鳕鱼蒸熟碾碎(仔细挑刺!)',tex:'2-3口大小,不宜太大'},
+  rb_chk_carrot:{n:'鸡肉胡萝卜饭团',t:'riceball',ps:'poultry',
+    i:[ing('rice',60),ing('chicken',25),ing('carrot',15),ing('pumpkin',10)],
+    tip:'鸡胸撕丝剁碎,加南瓜泥增加湿润',tex:'可捏成手指条状'},
+  rb_shrimp_tofu:{n:'虾仁豆腐饭团',t:'riceball',ps:'fish',
+    i:[ing('rice',50),ing('shrimp',20),ing('tofu',30),ing('spinach',10)],
+    tip:'豆腐压碎拌饭增加绵软,虾仁剁碎蒸熟',tex:'菠菜焯水去草酸'},
+  rb_liver_spin:{n:'猪肝菠菜饭团',t:'riceball',ps:'livestock',
+    i:[ing('rice',60),ing('pork_liver',15),ing('spinach',15),ing('tomato',10)],
+    tip:'猪肝浸泡去血水蒸熟压泥,番茄调味',tex:'每周1-2次补铁,量15g左右'},
+  rb_salmon_avo:{n:'三文鱼牛油果饭团',t:'riceball',ps:'fish',
+    i:[ing('rice',55),ing('salmon',25),ing('avocado',20),ing('nori',1)],
+    tip:'三文鱼蒸熟碾碎+牛油果泥,海苔碎撒面',tex:'海苔增加抓握力'},
+  rb_pork_corn:{n:'猪肉玉米饭团',t:'riceball',ps:'livestock',
+    i:[ing('rice',60),ing('pork',25),ing('corn',15),ing('carrot',10)],
+    tip:'猪肉剁蓉加少许淀粉蒸熟,玉米压碎',tex:'猪肉比牛肉嫩,适合入门'},
+  rb_chk_pump:{n:'鸡肉南瓜饭团',t:'riceball',ps:'poultry',
+    i:[ing('rice',55),ing('chicken_leg',25),ing('pumpkin',20),ing('pea',10)],
+    tip:'鸡腿肉嫩不柴,南瓜做天然甜味粘合剂',tex:'金黄色更吸引宝宝'},
+  rb_tofu_veg:{n:'豆腐蔬菜饭团',t:'riceball',ps:'bean',
+    i:[ing('rice',55),ing('tofu',35),ing('carrot',10),ing('bok_choy',10),ing('sesame',3)],
+    tip:'豆腐压碎拌饭,芝麻酱增香补钙',tex:'芝麻酱不超5g'},
+  rb_lamb_carrot:{n:'羊肉胡萝���饭团',t:'riceball',ps:'livestock',
+    i:[ing('rice',60),ing('lamb',25),ing('carrot',15),ing('zucchini',10)],
+    tip:'羊肉剁蓉加姜末去膻',tex:'胡萝卜甜味平衡膻味'},
+  rb_bass_pump:{n:'鲈鱼南瓜饭团',t:'riceball',ps:'fish',
+    i:[ing('rice',55),ing('seabass',25),ing('pumpkin',15),ing('broccoli',10)],
+    tip:'鲈鱼刺少肉嫩,蒸熟碾碎',tex:'仍需仔细检查鱼刺'},
+  rb_egg_nori:{n:'蛋皮虾仁海苔卷',t:'riceball',ps:'egg',
+    i:[ing('rice',50),ing('egg',25),ing('shrimp',15),ing('nori',1),ing('cucumber',10)],
+    tip:'蛋摊薄饼铺饭+虾碎+黄瓜丝卷起切段',tex:'蛋��别太脆;切2cm小段'},
+  rb_duck_mush:{n:'鸭肉��菇饭团',t:'riceball',ps:'poultry',
+    i:[ing('rice',60),ing('duck',25),ing('mushroom',15),ing('corn',10)],
+    tip:'鸭肉去皮剁蓉蒸熟,香菇焯水切碎',tex:'鸭肉脂肪适中不柴'},
+
+  // 配菜 12
+  sd_veg:{n:'手指蔬菜条',t:'side',ps:null,
+    i:[ing('broccoli',30),ing('carrot',20)],tip:'蒸至手指能捏烂',tex:'5cm长,小指粗'},
+  sd_pump:{n:'南瓜泥',t:'side',ps:null,
+    i:[ing('pumpkin',50)],tip:'蒸熟压泥,加少许牛奶调稀',tex:'可做蘸酱'},
+  sd_tom_egg:{n:'番茄炒蛋碎',t:'side',ps:'egg',
+    i:[ing('tomato',30),ing('egg',25)],tip:'番茄去皮切碎,蛋炒碎',tex:'少油少盐'},
+  sd_avo:{n:'牛油果条',t:'side',ps:null,
+    i:[ing('avocado',30)],tip:'选熟透的切条',tex:'可滚燕麦碎防滑'},
+  sd_steam_egg:{n:'蒸蛋羹',t:'side',ps:'egg',
+    i:[ing('egg',40),ing('milk',40)],tip:'蛋+等量温牛奶过滤蒸8分钟',tex:'嫩滑如布丁'},
+  sd_potato:{n:'奶香土豆泥',t:'side',ps:null,
+    i:[ing('potato',50),ing('milk',20),ing('cheese',5)],tip:'土豆蒸熟+牛奶+奶酪拌匀',tex:'可用裱花嘴挤有趣形状'},
+  sd_shrimp_bok:{n:'虾皮小白菜',t:'side',ps:'fish',
+    i:[ing('bok_choy',40),ing('dried_shrimp',3)],tip:'虾皮泡软切碎拌入',tex:'虾皮务必泡软切碎'},
+  sd_yam:{n:'蒸山药条',t:'side',ps:null,
+    i:[ing('yam',50)],tip:'去皮切条蒸15分钟(戴手套)',tex:'天然粘滑好抓握'},
+  sd_okra:{n:'秋��手指条',t:'side',ps:null,
+    i:[ing('okra',40)],tip:'整根焯水2分钟纵向对半切',tex:'粘液助吞咽;种子可食'},
+  sd_sesame_noodle:{n:'芝麻酱拌面',t:'side',ps:null,
+    i:[ing('noodle',50),ing('sesame',5),ing('cucumber',10)],tip:'面煮软烂+芝麻酱+黄瓜丝',tex:'面剪3cm短段'},
+  sd_lotus_cake:{n:'莲藕饼',t:'side',ps:'livestock',
+    i:[ing('lotus_root',30),ing('pork',20),ing('egg',10)],tip:'藕丝+肉蓉+蛋液煎饼',tex:'厚约0.5cm'},
+  sd_corn_cup:{n:'玉米蛋杯',t:'side',ps:'egg',
+    i:[ing('egg',30),ing('corn',15),ing('cheese',5)],tip:'蛋液+玉米碎+奶酪倒模具蒸',tex:'星星形状增趣味'},
+
+  // 点心 12
+  sn_banana_cake:{n:'香蕉小饼',t:'snack',ps:'egg',
+    i:[ing('banana',40),ing('egg',25),ing('oat',10)],tip:'香蕉泥+蛋+燕麦煎金黄',tex:'掌心一半大,0.5cm厚'},
+  sn_sp_ball:{n:'红薯丸子',t:'snack',ps:null,
+    i:[ing('sweet_potato',50),ing('oat',5)],tip:'红薯泥+燕麦粉搓球蒸10分钟',tex:'鹌鹑蛋大小'},
+  sn_yogurt_fruit:{n:'酸奶水果碗',t:'snack',ps:null,
+    i:[ing('yogurt',80),ing('blueberry',15),ing('banana',15)],tip:'��奶+蓝莓(对半切)+香蕉片',tex:'蓝莓必须对半��'},
+  sn_cheese_fruit:{n:'奶酪水果盘',t:'snack',ps:null,
+    i:[ing('cheese',10),ing('dragon_fruit',20),ing('apple',20)],tip:'奶酪切块+水果条',tex:'苹果蒸3分钟软化'},
+  sn_mango_shake:{n:'芒果奶昔',t:'snack',ps:null,
+    i:[ing('mango',40),ing('milk',100)],tip:'芒果+牛奶搅打不加糖',tex:'用吸管杯'},
+  sn_cod_cake:{n:'鳕鱼小饼',t:'snack',ps:'fish',
+    i:[ing('cod',25),ing('egg',15),ing('potato',20)],tip:'鳕鱼碾碎(挑刺)+蛋+土豆泥煎饼',tex:'富含DHA;5cm圆饼'},
+  sn_pp_cheese:{n:'紫薯奶酪球',t:'snack',ps:null,
+    i:[ing('purple_potato',40),ing('cheese',8)],tip:'紫薯泥包奶酪搓球',tex:'紫色吸引宝宝'},
+  sn_yam_cake:{n:'山药小饼',t:'snack',ps:'egg',
+    i:[ing('yam',40),ing('egg',15),ing('oat',5)],tip:'山药泥+蛋+燕麦粉煎',tex:'天然粘性好成型'},
+  sn_straw_yogurt:{n:'草莓酸奶杯',t:'snack',ps:null,
+    i:[ing('yogurt',80),ing('strawberry',20),ing('oat',5)],tip:'草莓切小���+酸奶+燕麦碎',tex:'草莓切四瓣防呛'},
+  sn_pudding:{n:'蛋奶布丁',t:'snack',ps:'egg',
+    i:[ing('egg',25),ing('milk',80)],tip:'蛋液+温牛奶过滤蒸12分钟',tex:'比蒸蛋更Q弹'},
+  sn_kiwi_banana:{n:'猕猴桃香蕉块',t:'snack',ps:null,
+    i:[ing('kiwi',25),ing('banana',25)],tip:'去皮切块直接手抓',tex:'选黄心猕猴桃不酸'},
+  sn_bread_cheese:{n:'面包奶酪梨片',t:'snack',ps:null,
+    i:[ing('bread',20),ing('cheese',8),ing('pear',20)],tip:'软面包铺奶酪+梨片切条',tex:'梨选熟软的'},
+
+  // 汤 6
+  soup_tom_tofu:{n:'番茄豆腐汤',t:'soup',ps:'bean',
+    i:[ing('tomato',30),ing('tofu',40)],tip:'番茄去皮煮烂+豆腐丁炖5分钟',tex:'豆腐切1cm丁'},
+  soup_pump_cream:{n:'南��浓汤',t:'soup',ps:null,
+    i:[ing('pumpkin',50),ing('milk',50)],tip:'南瓜蒸熟+牛奶搅打成浓汤',tex:'浓稠丝滑'},
+  soup_tom_egg:{n:'番茄蛋花汤',t:'soup',ps:'egg',
+    i:[ing('tomato',30),ing('egg',20)],tip:'番茄煮烂+蛋液淋入',tex:'蛋花要细碎'},
+  soup_shrimp_zuc:{n:'虾皮冬瓜汤',t:'soup',ps:'fish',
+    i:[ing('dried_shrimp',3),ing('zucchini',40)],tip:'虾皮泡软切碎+西葫芦片煮软',tex:'虾皮补钙提鲜'},
+  soup_corn_chk:{n:'玉��鸡茸汤',t:'soup',ps:'poultry',
+    i:[ing('corn',20),ing('chicken',15),ing('egg',10)],tip:'玉米打糊+鸡蓉煮熟+蛋花',tex:'浓稠有营养'},
+  soup_yam_rib:{n:'山药排骨汤',t:'soup',ps:'livestock',
+    i:[ing('yam',30),ing('pork',20)],tip:'排骨焯水+山药炖40分钟',tex:'取汤+软山药喂'},
+
+  // DHA
+  dha:{n:'DHA藻油',t:'supplement',ps:null,i:[ing('dha_oil',1)],tip:'挤入辅食',tex:''},
+
+  // 奶制品 6
+  dk_milk:{n:'鲜牛奶 200ml',t:'milk',ps:null,i:[ing('milk',200)],tip:'全脂鲜牛奶温热',tex:''},
+  dk_yogurt:{n:'原味酸奶',t:'milk',ps:null,i:[ing('yogurt',100)],tip:'蛋白质≥3g/100g',tex:''},
+  dk_cheese_milk:{n:'奶���+半杯奶',t:'milk',ps:null,i:[ing('cheese',10),ing('milk',100)],tip:'1片奶酪+100ml温奶',tex:''},
+  dk_sesame_milk:{n:'芝麻牛奶',t:'milk',ps:null,i:[ing('milk',150),ing('sesame',5)],tip:'牛奶+1勺芝麻酱搅匀',tex:''},
+  dk_yogurt_cheese:{n:'酸奶奶酪组合',t:'milk',ps:null,i:[ing('yogurt',80),ing('cheese',8)],tip:'钙含量超200ml牛奶',tex:''},
+  dk_banana_shake:{n:'香蕉牛奶昔',t:'milk',ps:null,i:[ing('milk',150),ing('banana',30)],tip:'搅打不加糖',tex:''},
+};
+
+// 7天菜单
+const W=[
+  {d:'周一',m:{breakfast:['dk_milk','rb_chk_carrot','sd_veg'],am_snack:['sn_banana_cake'],lunch:['rb_cod_broc','sd_potato','soup_tom_tofu'],pm_snack:['sn_yogurt_fruit','dha'],dinner:['rb_egg_floss','sd_okra','dk_yogurt']}},
+  {d:'周二',m:{breakfast:['dk_cheese_milk','rb_beef_mush','sd_avo'],am_snack:['sn_pp_cheese'],lunch:['rb_tofu_veg','sd_steam_egg','soup_pump_cream'],pm_snack:['sn_cheese_fruit','dha'],dinner:['rb_3fresh','sd_shrimp_bok','dk_yogurt']}},
+  {d:'周三',m:{breakfast:['dk_sesame_milk','rb_egg_nori','sd_yam'],am_snack:['sn_mango_shake'],lunch:['rb_liver_spin','sd_tom_egg','soup_corn_chk'],pm_snack:['sn_straw_yogurt','dha'],dinner:['rb_chk_pump','sd_avo','dk_milk']}},
+  {d:'周四',m:{breakfast:['dk_banana_shake','rb_salmon_avo','sd_veg'],am_snack:['sn_yam_cake'],lunch:['rb_pork_corn','sd_sesame_noodle','soup_tom_egg'],pm_snack:['sn_kiwi_banana','dha'],dinner:['rb_egg_floss','sd_corn_cup','dk_yogurt_cheese']}},
+  {d:'周五',m:{breakfast:['dk_milk','rb_bass_pump','sd_okra'],am_snack:['sn_cod_cake'],lunch:['rb_lamb_carrot','sd_pump','soup_shrimp_zuc'],pm_snack:['sn_yogurt_fruit','dha'],dinner:['rb_tofu_veg','sd_steam_egg','dk_cheese_milk']}},
+  {d:'周六',m:{breakfast:['dk_yogurt_cheese','rb_duck_mush','sd_yam'],am_snack:['sn_pudding'],lunch:['rb_shrimp_tofu','sd_lotus_cake','soup_tom_tofu'],pm_snack:['sn_bread_cheese','dha'],dinner:['rb_beef_mush','sd_avo','dk_sesame_milk']}},
+  {d:'周日',m:{breakfast:['dk_banana_shake','rb_liver_spin','sd_potato'],am_snack:['sn_sp_ball'],lunch:['rb_3fresh','sd_shrimp_bok','soup_yam_rib'],pm_snack:['sn_cheese_fruit','dha'],dinner:['rb_chk_carrot','sd_tom_egg','dk_milk']}},
+];
+
+const MEALS=[
+  {k:'breakfast',l:'早餐',time:'07:30',bg:'pk'},
+  {k:'am_snack',l:'上午点心',time:'10:00',bg:'cm'},
+  {k:'lunch',l:'午餐',time:'12:00',bg:'mt'},
+  {k:'pm_snack',l:'下午���心',time:'15:00',bg:'lv'},
+  {k:'dinner',l:'晚餐',time:'18:00',bg:'bl'},
+];
+const MEAL_KEYS=MEALS.map(m=>m.k);
+
+const INTAKE=[
+  {l:'没吃',v:0,e:'&#10060;'},
+  {l:'少量',v:.25,e:'&#128548;'},
+  {l:'大半',v:.7,e:'&#128523;'},
+  {l:'全吃',v:1,e:'&#129321;'},
+];
+
+const PS_TAG={
+  poultry:{l:'禽',cls:'bg-pc-100 text-pc-400'},
+  livestock:{l:'畜',cls:'bg-pk-100 text-pk-400'},
+  fish:{l:'鱼',cls:'bg-bl-100 text-bl-400'},
+  bean:{l:'豆',cls:'bg-mt-100 text-mt-400'},
+  egg:{l:'蛋',cls:'bg-cm-100 text-yellow-700'},
+};
+
+const CAT_CLS={staple:'bg-lv-50 text-lv-400',protein:'bg-pk-50 text-pk-400',
+  veg:'bg-mt-50 text-mt-400',fruit:'bg-pc-50 text-pc-400',
+  dairy:'bg-bl-50 text-bl-400',supplement:'bg-gray-100 text-gray-400'};
+
+// Gap advice foods
+const GAP={
+  p:[{d:'加1个鸡蛋'},{d:'加1片奶酪'},{d:'加酸奶80g'}],
+  ca:[{d:'加1片奶酪(+80mg)'},{d:'加酸奶(+96mg)'},{d:'加芝麻酱5g(+44mg)'}],
+  fe:[{d:'加猪肝泥15g(+3.4mg)'},{d:'加牛肉碎25g'},{d:'加蛋黄1个'}],
+  zn:[{d:'加牛肉碎25g(+1.2mg)'},{d:'加猪肝泥15g'},{d:'加奶酪1片'}],
+  va:[{d:'加猪肝泥15g'},{d:'加胡萝卜条30g'},{d:'加红薯块30g'}],
+  dha:[{d:'补1粒DHA藻油'},{d:'加三文鱼25g'},{d:'加鳕鱼25g'}],
+};
+
+// ═══════════ STATE ═══════════
+let cur=new Date(), view='day', intake={}, swaps={}, openSwap=null, birthday=null;
+
+const dk=d=>d.toISOString().slice(0,10);
+const dow=d=>(d.getDay()+6)%7;
+
+function load(){
+  try{intake=JSON.parse(localStorage.getItem('bi')||'{}')}catch{intake={}}
+  try{swaps=JSON.parse(localStorage.getItem('bs')||'{}')}catch{swaps={}}
+  birthday=localStorage.getItem('baby_bd')||null;
+  if(!birthday)document.getElementById('bd-modal').classList.remove('hidden');
+}
+function save(){localStorage.setItem('bi',JSON.stringify(intake));localStorage.setItem('bs',JSON.stringify(swaps))}
+
+function saveBirthday(){
+  const v=document.getElementById('bd-input').value;
+  if(!v)return;
+  birthday=v;localStorage.setItem('baby_bd',v);
+  closeBdModal();render();
+}
+function closeBdModal(){document.getElementById('bd-modal').classList.add('hidden')}
+function openBdModal(){
+  if(birthday)document.getElementById('bd-input').value=birthday;
+  document.getElementById('bd-modal').classList.remove('hidden');
+}
+
+function eid(d,mk,si,orig){return swaps[dk(d)]?.[mk]?.[si]||orig}
+
+function nutr(d){
+  const k=dk(d),plan=W[dow(d)].m,tot={},arr={},pf=curPortion();
+  NK.forEach(n=>{tot[n]=0;arr[n]=0});
+  for(const[mk,rids]of Object.entries(plan)){
+    for(let si=0;si<rids.length;si++){
+      const rid=eid(d,mk,si,rids[si]),r=R[rid];if(!r)continue;
+      const iv=intake[k]?.[mk]?.[rid],fac=iv!==undefined?iv:-1;
+      for(const g of r.i){const fd=F[g.food];if(!fd)continue;const m=g.grams*pf/100;
+        NK.forEach(n=>{arr[n]+=fd[n]*m;if(fac>=0)tot[n]+=fd[n]*m*fac})}
+    }
+  }
+  return{tot,arr}
+}
+
+function psrcs(d){
+  const k=dk(d),plan=W[dow(d)].m,s=new Set();
+  for(const[mk,rids]of Object.entries(plan))
+    for(let si=0;si<rids.length;si++){const r=R[eid(d,mk,si,rids[si])];if(r?.ps)s.add(r.ps)}
+  return s;
+}
+
+// ═══════════ RENDER ═════���═════
+function render(){
+  const d=cur,dn=['日','一','二','三','四','五','六'];
+  document.getElementById('hd-date').textContent=`${d.getMonth()+1}/${d.getDate()} 周${dn[d.getDay()]}`;
+  // Age header
+  const stg=curStage(),months=birthday?calcMonths(birthday):17;
+  document.getElementById('hd-age').innerHTML=`<span onclick="openBdModal()" class="cursor-pointer">${months}月龄 · ${stg.phase} <span class="text-gray-300">&#x270E;</span></span>`;
+  // Tabs
+  ['day','week','growth'].forEach(v=>{
+    const el=document.getElementById('t-'+v);
+    el.className=v===view?'pb-1.5 text-xs border-b-2 border-pk-400 text-pk-400 font-semibold':'pb-1.5 text-xs border-b-2 border-transparent text-gray-400';
+  });
+  document.getElementById('app').innerHTML=view==='day'?renderDay():view==='week'?renderWeek():renderGrowth();
+}
+
+function renderDay(){
+  const d=cur,k=dk(d),plan=W[dow(d)],{tot,arr}=nutr(d);
+  const hasRec=Object.keys(intake[k]||{}).length>0;
+  const stg=curStage(), cDRI=getCurDRI(), pf=curPortion();
+  let h='';
+
+  // ── Stage tip (if portion != 1.0) ──
+  if(pf!==1.0)h+=`<div class="bg-lv-50 rounded-xl px-3 py-2 mb-2 fade"><p class="text-[10px] text-lv-400">&#x1F4D0; 份量系数 ×${pf.toFixed(2)}（${stg.label}）· ${stg.texNote.slice(0,30)}...</p></div>`;
+
+  // ── Nutrition bar ──
+  h+=`<div class="bg-white rounded-xl p-3 mb-3 shadow-sm fade">
+    <p class="text-[11px] font-semibold text-gray-500 mb-2">营养覆盖 <span class="font-normal text-gray-300">${stg.label}</span></p>
+    <div class="space-y-1.5">`;
+  for(const nk of NK){
+    const info=cDRI[nk],val=hasRec?tot[nk]:arr[nk];
+    const pct=Math.min(100,Math.round(val/info.t*100));
+    const col=pct>=80?'#6BC87C':pct>=50?'#F0C24A':'#E87E7E';
+    h+=`<div class="flex items-center gap-2">
+      <span class="text-[10px] text-gray-400 w-8">${info.n}</span>
+      <div class="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+        <div class="bar-fill h-full rounded-full" style="width:${pct}%;background:${col}"></div>
+      </div>
+      <span class="text-[10px] w-16 text-right" style="color:${col}">${Math.round(val*10)/10}/${info.t}</span>
+    </div>`;
+  }
+  h+=`</div><p class="text-[9px] text-gray-300 text-right mt-1">${hasRec?'按实际进食折算':'按计划量估算'}</p></div>`;
+
+  // ── Meals ──
+  for(const ml of MEALS){
+    const rids=plan.m[ml.k]||[];
+    h+=`<div class="bg-white rounded-xl mb-2.5 shadow-sm overflow-hidden fade">
+      <div class="bg-${ml.bg}-50 px-3 py-1.5 flex items-center justify-between">
+        <span class="text-xs font-semibold text-gray-600">${ml.l}</span>
+        <span class="text-[10px] text-gray-400">${ml.time}</span>
+      </div><div class="p-3 space-y-2">`;
+
+    for(let si=0;si<rids.length;si++){
+      const rid=eid(d,ml.k,si,rids[si]),r=R[rid];if(!r)continue;
+      const swapped=rid!==rids[si];
+      const cv=intake[k]?.[ml.k]?.[rid];
+      const spk=`${ml.k}-${si}`;
+      const isOpen=openSwap===spk;
+
+      // Card
+      h+=`<div class="${swapped?'border-l-2 border-amber-300 pl-2':''}">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-1.5 flex-1 min-w-0">
+            <span class="text-xs font-medium text-gray-700 truncate">${r.n}</span>`;
+      if(r.ps)h+=`<span class="text-[9px] px-1.5 py-0.5 rounded-full ${PS_TAG[r.ps].cls}">${PS_TAG[r.ps].l}</span>`;
+      if(swapped)h+=`<span class="text-[9px] px-1 py-0.5 rounded bg-amber-50 text-amber-500">换</span>`;
+      h+=`</div><button onclick="toggleSwap('${ml.k}',${si})" class="text-[10px] ${isOpen?'text-pk-400 font-semibold':'text-gray-300'} ml-2 shrink-0">&#x1F504;</button></div>`;
+
+      // Swap panel
+      if(isOpen){
+        const alts=Object.entries(R).filter(([id,x])=>id!==rid&&x.t===r.t);
+        h+=`<div class="mt-1.5 mb-1 p-2 bg-gray-50 rounded-lg"><p class="text-[9px] text-gray-400 mb-1.5">选择替换</p><div class="swap-grid">`;
+        for(const[aid,ar]of alts){
+          const ptag=ar.ps?`<span class="text-[8px] px-1 rounded ${PS_TAG[ar.ps].cls}">${PS_TAG[ar.ps].l}</span>`:'';
+          h+=`<button onclick="doSwap('${k}','${ml.k}',${si},'${aid}')" class="text-left text-[10px] px-2 py-1 rounded bg-white border border-gray-100 text-gray-600 hover:border-pk-200 truncate">${ar.n} ${ptag}</button>`;
+        }
+        h+=`</div>`;
+        if(swapped)h+=`<button onclick="undoSwap('${k}','${ml.k}',${si})" class="mt-1.5 text-[9px] text-gray-400 underline">恢复: ${R[rids[si]]?.n}</button>`;
+        h+=`</div>`;
+      }
+
+      // Ingredients (with age-adjusted grams)
+      h+=`<div class="flex flex-wrap gap-1 mt-1">`;
+      for(const g of r.i){const fd=F[g.food];if(!fd)continue;
+        const ag=Math.round(g.grams*pf);
+        h+=`<span class="text-[9px] px-1.5 py-0.5 rounded-full ${CAT_CLS[fd.c]||'bg-gray-50 text-gray-400'}">${fd.n}${ag}g</span>`}
+      h+=`</div>`;
+
+      // Tips (age-adapted)
+      if(r.tip){
+        const texAdapt=stg.texLevel>=3?'':'('+stg.texNote.slice(0,20)+'...)';
+        h+=`<p class="text-[9px] text-gray-400 mt-1">${r.tip}${r.tex&&stg.texLevel<=2?' · '+r.tex:''}</p>`;
+      }
+
+      // Intake
+      h+=`<div class="flex gap-1 mt-1.5">`;
+      for(const lv of INTAKE){
+        const act=cv===lv.v;
+        h+=`<button onclick="setI('${k}','${ml.k}','${rid}',${lv.v})" class="text-[10px] px-2 py-0.5 rounded-md border ${act?'border-pk-400 bg-pk-50 text-pk-400 font-medium':'border-gray-100 text-gray-400'}">${lv.e} ${lv.l}</button>`;
+      }
+      h+=`</div></div>`;
+    }
+    h+=`</div></div>`;
+  }
+
+  // ── Gap advice ──
+  if(hasRec) h+=renderGap(d);
+  return h;
+}
+
+function renderGap(d){
+  const k=dk(d),recorded=MEAL_KEYS.filter(m=>intake[k]?.[m]&&Object.keys(intake[k][m]).length>0);
+  if(!recorded.length)return'';
+  const pf=curPortion(),cDRI=getCurDRI();
+  const eaten={};NK.forEach(n=>eaten[n]=0);
+  const plan=W[dow(d)].m;
+  for(const mk of recorded){
+    const rids=plan[mk]||[];
+    for(let si=0;si<rids.length;si++){
+      const rid=eid(d,mk,si,rids[si]),r=R[rid];if(!r)continue;
+      const iv=intake[k]?.[mk]?.[rid];if(iv===undefined)continue;
+      for(const g of r.i){const fd=F[g.food];if(!fd)continue;const m=g.grams*pf/100;
+        NK.forEach(n=>eaten[n]+=fd[n]*m*iv)}
+    }
+  }
+  const remaining=MEAL_KEYS.filter(m=>!recorded.includes(m));
+  const futArr={};NK.forEach(n=>futArr[n]=0);
+  for(const mk of remaining){
+    const rids=plan[mk]||[];
+    for(let si=0;si<rids.length;si++){
+      const r=R[eid(d,mk,si,rids[si])];if(!r)continue;
+      for(const g of r.i){const fd=F[g.food];if(!fd)continue;const m=g.grams*pf/100;
+        NK.forEach(n=>futArr[n]+=fd[n]*m)}
+    }
+  }
+  const gaps=[];
+  for(const nk of NK){
+    const proj=eaten[nk]+futArr[nk],info=cDRI[nk],pct=Math.round(proj/info.t*100);
+    if(pct<80)gaps.push({k:nk,n:info.n,pct,eaten:eaten[nk],t:info.t,u:info.u});
+  }
+  if(!gaps.length)return`<div class="bg-mt-50 rounded-xl p-3 mb-3 fade"><p class="text-xs text-mt-400 font-medium">&#x2705; 营养覆盖良好${remaining.length?'，按计划吃完即可':'!'}</p></div>`;
+  const when=remaining.length?'接下来':'明天';
+  let h=`<div class="bg-amber-50 rounded-xl p-3 mb-3 fade">
+    <p class="text-xs font-medium text-amber-600 mb-2">&#x26A0;&#xFE0F; 营养缺口 · ${when}建议补充</p>`;
+  for(const g of gaps){
+    const tips=(GAP[g.k]||[]).slice(0,2).map(t=>`<span class="text-[9px] px-1.5 py-0.5 rounded bg-white text-amber-600">${t.d}</span>`).join(' ');
+    h+=`<div class="mb-1.5"><div class="flex items-center justify-between"><span class="text-[10px] text-gray-600">${g.n}</span><span class="text-[10px] text-amber-500">${Math.round(g.eaten*10)/10}/${g.t}${g.u} (${g.pct}%)</span></div><div class="flex gap-1 mt-0.5">${tips}</div></div>`;
+  }
+  h+=`</div>`;return h;
+}
+
+function renderWeek(){
+  const mon=new Date(cur);mon.setDate(mon.getDate()-dow(mon));
+  const dn=['一','二','三','四','五','六','日'];
+  let h='';
+
+  // ── Week grid: compact calendar ──
+  h+=`<div class="bg-white rounded-xl p-3 mb-3 shadow-sm fade">
+    <p class="text-[11px] font-semibold text-gray-500 mb-2">一周概览</p>
+    <div class="grid grid-cols-7 gap-1">`;
+  for(let i=0;i<7;i++)h+=`<div class="text-[9px] text-gray-400 text-center font-medium">${dn[i]}</div>`;
+  for(let i=0;i<7;i++){
+    const d=new Date(mon);d.setDate(d.getDate()+i);
+    const k=dk(d),isToday=dk(d)===dk(new Date()),isSel=dk(d)===dk(cur);
+    const srcs=psrcs(d);
+    const hasI=!!intake[k]&&Object.keys(intake[k]).length>0;
+    h+=`<div onclick="pickDay(${d.getTime()})" class="rounded-lg p-1.5 text-center cursor-pointer ${isSel?'ring-1.5 ring-pk-400 bg-pk-50':isToday?'bg-pc-50':'bg-gray-50'} hover:bg-pk-50/50">
+      <div class="text-[10px] font-medium ${isToday?'text-pk-400':'text-gray-500'}">${d.getDate()}</div>
+      <div class="flex flex-wrap gap-0.5 justify-center mt-0.5">
+        ${[...srcs].map(s=>`<span class="w-1.5 h-1.5 rounded-full" style="background:${DRI[{poultry:'va',livestock:'p',fish:'dha',bean:'zn',egg:'ca'}[s]||'p'].color}"></span>`).join('')}
+      </div>
+      ${hasI?'<div class="text-[8px] text-mt-400 mt-0.5">&#x2714;</div>':''}
+    </div>`;
+  }
+  h+=`</div></div>`;
+
+  // ── Protein distribution ──
+  h+=`<div class="bg-white rounded-xl p-3 mb-3 shadow-sm fade">
+    <p class="text-[11px] font-semibold text-gray-500 mb-2">蛋白质来源</p>
+    <div class="space-y-1.5">`;
+  for(let i=0;i<7;i++){
+    const d=new Date(mon);d.setDate(d.getDate()+i);
+    const k2=dk(d),plan=W[dow(d)].m,seen=[];
+    for(const[mk,rids]of Object.entries(plan))
+      for(let si=0;si<rids.length;si++){
+        const r=R[eid(d,mk,si,rids[si])];
+        if(r?.ps&&!seen.find(x=>x.ps===r.ps&&x.n===r.n))seen.push({ps:r.ps,n:r.n})}
+    h+=`<div class="flex items-center gap-2">
+      <span class="text-[10px] text-gray-400 w-4">${dn[i]}</span>
+      <div class="flex gap-1 flex-wrap flex-1">
+        ${seen.map(s=>`<span class="text-[9px] px-1.5 py-0.5 rounded-full ${PS_TAG[s.ps].cls}">${s.n}</span>`).join('')}
+      </div></div>`;
+  }
+  h+=`</div></div>`;
+
+  // ── Week nutrition ──
+  const cDRI=getCurDRI();
+  h+=`<div class="bg-white rounded-xl p-3 mb-3 shadow-sm fade">
+    <p class="text-[11px] font-semibold text-gray-500 mb-2">每日营养</p>
+    <div class="flex gap-1 mb-1.5">
+      ${NK.map(k=>`<span class="flex-1 text-[8px] text-center text-gray-400">${cDRI[k].n}</span>`).join('')}
+    </div>`;
+  for(let i=0;i<7;i++){
+    const d=new Date(mon);d.setDate(d.getDate()+i);
+    const {arr}=nutr(d);
+    h+=`<div class="flex items-center gap-1 mb-1"><span class="text-[10px] text-gray-400 w-4">${dn[i]}</span><div class="flex gap-1 flex-1">`;
+    for(const nk of NK){
+      const pct=Math.min(100,Math.round(arr[nk]/cDRI[nk].t*100));
+      const col=pct>=80?'#6BC87C':pct>=50?'#F0C24A':'#E87E7E';
+      h+=`<div class="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden"><div class="h-full rounded-full" style="width:${pct}%;background:${col}"></div></div>`;
+    }
+    h+=`</div></div>`;
+  }
+  h+=`</div>`;
+  return h;
+}
+
+// ═══════════ GROWTH VIEW ═══════════
+function renderGrowth(){
+  const months=birthday?calcMonths(birthday):17;
+  const stg=curStage();
+  let h='';
+
+  // Current stage card
+  h+=`<div class="bg-white rounded-xl p-4 mb-3 shadow-sm fade">
+    <div class="flex items-center justify-between mb-2">
+      <p class="text-sm font-semibold text-gray-700">${months}月龄</p>
+      <button onclick="openBdModal()" class="text-[10px] text-pk-400">修改生日</button>
+    </div>
+    <div class="bg-pk-50 rounded-lg p-3 mb-3">
+      <p class="text-xs font-medium text-pk-400 mb-1">当前阶段：${stg.label}</p>
+      <p class="text-[11px] text-gray-600">${stg.phase}</p>
+    </div>
+    <div class="mb-2">
+      <p class="text-[11px] font-medium text-gray-600 mb-1">质地要求</p>
+      <p class="text-[10px] text-gray-500">${stg.texNote}</p>
+    </div>
+    <div class="mb-2">
+      <p class="text-[11px] font-medium text-gray-600 mb-1">份量系数</p>
+      <p class="text-[10px] text-gray-500">基础食谱 ×${stg.portion.toFixed(2)}（随月龄自动增加）</p>
+    </div>`;
+  if(stg.unlock.length){
+    h+=`<div><p class="text-[11px] font-medium text-gray-600 mb-1">本阶段解锁</p>`;
+    for(const u of stg.unlock) h+=`<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-mt-50 text-mt-400 mr-1 mb-1">&#x2705; ${u}</span>`;
+    h+=`</div>`;
+  }
+  h+=`</div>`;
+
+  // Nutrition targets comparison
+  h+=`<div class="bg-white rounded-xl p-4 mb-3 shadow-sm fade">
+    <p class="text-[11px] font-semibold text-gray-500 mb-2">各阶段营养目标</p>
+    <div class="overflow-x-auto"><table class="w-full text-[10px]">
+      <tr class="border-b border-gray-100">
+        <td class="py-1 text-gray-400">阶段</td>
+        ${NK.map(k=>`<td class="py-1 text-center text-gray-400">${DRI[k].n}</td>`).join('')}
+        <td class="py-1 text-center text-gray-400">份量</td>
+      </tr>`;
+  for(const s of STAGES){
+    const isCur=months>=s.min&&months<=s.max;
+    h+=`<tr class="${isCur?'bg-pk-50 font-medium':''}">
+      <td class="py-1.5 ${isCur?'text-pk-400':'text-gray-500'}">${s.label}${isCur?' &#x25C0;':''}</td>
+      ${NK.map(k=>`<td class="py-1.5 text-center ${isCur?'text-pk-400':'text-gray-500'}">${s.dri[k]}</td>`).join('')}
+      <td class="py-1.5 text-center ${isCur?'text-pk-400':'text-gray-500'}">×${s.portion.toFixed(2)}</td>
+    </tr>`;
+  }
+  h+=`</table></div></div>`;
+
+  // Timeline
+  h+=`<div class="bg-white rounded-xl p-4 mb-3 shadow-sm fade">
+    <p class="text-[11px] font-semibold text-gray-500 mb-3">成长时间线</p>
+    <div class="relative pl-4 border-l-2 border-gray-100 space-y-4">`;
+  for(const s of STAGES){
+    const isCur=months>=s.min&&months<=s.max;
+    const isPast=months>s.max;
+    const dotCls=isCur?'bg-pk-400':'isPast'?'bg-mt-400':'bg-gray-200';
+    h+=`<div class="relative">
+      <div class="absolute -left-[21px] top-0.5 w-3 h-3 rounded-full ${isCur?'bg-pk-400 ring-2 ring-pk-100':isPast?'bg-mt-400':'bg-gray-200'}"></div>
+      <p class="text-xs ${isCur?'font-semibold text-pk-400':isPast?'text-gray-500':'text-gray-400'}">${s.label} · ${s.phase}</p>
+      <p class="text-[10px] text-gray-400 mt-0.5">${s.texNote}</p>`;
+    if(s.unlock.length)h+=`<div class="mt-1">${s.unlock.map(u=>`<span class="inline-block text-[9px] px-1.5 py-0.5 rounded bg-mt-50 text-mt-400 mr-1 mb-0.5">${u}</span>`).join('')}</div>`;
+    h+=`</div>`;
+  }
+  h+=`</div></div>`;
+
+  return h;
+}
+
+// ═══════════ ACTIONS ═══════════
+function go(n){cur.setDate(cur.getDate()+(view==='week'?n*7:n));openSwap=null;render()}
+function setView(v){view=v;openSwap=null;render()}
+function pickDay(ts){cur=new Date(ts);view='day';openSwap=null;render()}
+function setI(k,mk,rid,v){
+  if(!intake[k])intake[k]={};if(!intake[k][mk])intake[k][mk]={};
+  intake[k][mk][rid]===v?delete intake[k][mk][rid]:intake[k][mk][rid]=v;
+  save();render();
+}
+function toggleSwap(mk,si){const s=`${mk}-${si}`;openSwap=openSwap===s?null:s;render()}
+function doSwap(k,mk,si,nid){
+  if(!swaps[k])swaps[k]={};if(!swaps[k][mk])swaps[k][mk]={};
+  swaps[k][mk][si]=nid;
+  if(intake[k]?.[mk]){const plan=W[dow(cur)].m;delete intake[k][mk][plan[mk]?.[si]];delete intake[k][mk][nid]}
+  openSwap=null;save();render();
+}
+function undoSwap(k,mk,si){if(swaps[k]?.[mk])delete swaps[k][mk][si];openSwap=null;save();render()}
+
+// ═══════════ INIT ═══════════
+load();render();
+</script>
+</body>
+</html>
